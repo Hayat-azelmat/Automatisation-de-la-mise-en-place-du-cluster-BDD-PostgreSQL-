@@ -1,0 +1,20 @@
+---
+# defaults file for repmgr
+
+repmgr_dir: /home/arizkir/binaries/pgpool-II-4.3.2
+repmgr_database: repmgr
+repmgr_user: repmgr
+postgresql_admin_user: postgres
+postgresql_admin_group: postgres
+repmgr_primary_hostname: OctroiPPBDD01
+repmgr_passfile: /home/postgres/.pgpass
+repmgr_postgresql_port: 5432
+postgresql_pg_hba: /data/pg_hba.conf
+postgresql_version: 12
+postgresql_data_directory: /data
+postgresql_log_directory: /var/log/postgresql
+path_postgresql: /usr/pgsql/bin
+repmgr_reconnect_attempts: 5
+repmgr_reconnect_interval: 5
+repmgr_conf_file: /etc/repmgr.conf
+repmgr_failover: manual

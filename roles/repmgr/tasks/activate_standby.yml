@@ -1,0 +1,39 @@
+---
+- name: repmgr | register primary node
+  shell: "repmgr primary register -F "
+  become_user: "{{ postgresql_admin_user }}"
+  become_flags: "-i"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | check if standby node is already added
+  shell: "repmgr cluster show | grep {{ ansible_facts['hostname'] }} | grep standby | wc -l"
+  become_user: "{{ postgresql_admin_user }}"
+  become_flags: "-i"
+  register: count_instance
+  ignore_errors: True
+  when:
+    - inventory_hostname in groups['secondaire']
+    - ansible_hostname != repmgr_primary_hostname
+
+- name: repmgr | clone standby node
+  shell: "repmgr -h {{ repmgr_primary_hostname }} -U {{repmgr_user }} -d {{ repmgr_database }} standby clone -F"
+  become_user: "{{ postgresql_admin_user }}"
+  become_flags: "-i"
+  when:
+    - inventory_hostname in groups['secondaire'] 
+    - ansible_hostname != repmgr_primary_hostname
+    - "count_instance.stdout|int  != 1"
+
+
+- name: repmgr | start standby node
+  service: name=postgresql-12 state=restarted
+  when: inventory_hostname in groups['secondaire']
+
+
+- name: repmgr | register standby node
+  shell: "repmgr standby register -F "
+  become_user: "{{ postgresql_admin_user }}"
+  become_flags: "-i"
+  when: inventory_hostname in groups['secondaire']
+

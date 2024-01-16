@@ -1,0 +1,5 @@
+---
+- hosts: all
+  tasks:
+    - debug: var=hostvars[groups['primaire']].ansible_eth1.ipv4.address
+

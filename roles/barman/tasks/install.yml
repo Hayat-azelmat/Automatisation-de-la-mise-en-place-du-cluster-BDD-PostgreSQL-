@@ -1,0 +1,14 @@
+---
+- name: "Install barman packages"
+  yum:
+    name: /home/arizkir/binaries/{{ item }}
+    state: present
+  loop:
+    - "python3-barman-{{ barman_version }}.el8.noarch.rpm "
+    - "barman-{{ barman_version }}.el8.noarch.rpm"
+
+- name: barman |  adding existing user barman to group postgres
+  user:
+    name: '{{ barman_user }}'
+    groups: "{{ postgresql_admin_group }}"
+    append: yes

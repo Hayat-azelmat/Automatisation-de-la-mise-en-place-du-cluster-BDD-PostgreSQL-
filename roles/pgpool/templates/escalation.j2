@@ -1,0 +1,18 @@
+#!/bin/bash
+# This script is run by wd_escalation_command to bring down the virtual IP on other pgpool nodes
+# before bringing up the virtual IP on the new active pgpool node.
+
+set -o xtrace
+
+PGPOOLS=({{ pgpool_primary_IP }} {{ pgpool_standby_IP }})
+
+VIP={{ pgpool_vip }}
+DEVICE=ens192
+
+for pgpool in "${PGPOOLS[@]}"; do
+    [ "$HOSTNAME" = "$pgpool" ] && continue
+
+    ssh {{ postgresql_admin_user }}@$pgpool "/usr/bin/sudo /usr/sbin/ip addr del $VIP/24 dev $DEVICE"
+done
+exit 0
+

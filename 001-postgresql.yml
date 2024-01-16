@@ -1,0 +1,21 @@
+---
+# Basic settings
+
+postgresql_admin_user: "postgres"
+postgresql_admin_group: "postgres"
+postgresql_version: 12
+postgresql_minor: 12.11-1
+postgresql_data_directory: "/data"
+postgresql_log_directory: "/var/log/postgresql"
+path_postgresql: /usr/pgsql/bin
+postgres_ports: [5432, 9898, 9999]
+postgresql_config:
+  listen: "listen_addresses = '*'"
+  shared: "shared_buffers = 2560MB"
+  workmem: "work_mem = 16MB"
+  maintmem: "maintenance_work_mem = 1024MB"
+  walbuf: "wal_buffers = 8MB"
+  logdes: "log_destination = 'stderr'"
+  logdir: "log_directory = '/var/log/postgresql'"
+  wallev: "wal_level = replica"
+

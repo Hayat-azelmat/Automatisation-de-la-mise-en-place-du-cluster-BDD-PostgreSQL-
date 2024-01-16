@@ -1,0 +1,5 @@
+---
+- name: PostgreSQL | start postgresql
+  service: name=postgresql-12 state=started
+  when: inventory_hostname in groups['primaire']
+

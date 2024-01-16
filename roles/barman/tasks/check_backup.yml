@@ -1,0 +1,12 @@
+---
+- name: barman | barman check server
+  become_user: barman
+  command: barman check {{ ansible_facts['hostname'] }}
+  register: result
+  when: inventory_hostname in groups['primaire']
+- name: barman | execute backup when check if successed
+  become_user: barman
+  command: barman backup {{ ansible_facts['hostname'] }}
+  when: 
+    - inventory_hostname in groups['primaire']
+    - result is succeeded

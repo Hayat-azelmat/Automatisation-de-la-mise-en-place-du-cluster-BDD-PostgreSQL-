@@ -1,0 +1,13 @@
+    primaire:
+      hosts:
+        OctroiPPBDD01:
+          ansible_host: 10.4.2.165
+          repmgr_node_id: 1
+          pgpool_node_id: 0
+	  
+    secondaire:
+      hosts:
+        OctroiPPBDD02:
+          ansible_host: 10.4.2.166
+          repmgr_node_id: 2
+          pgpool_node_id: 1

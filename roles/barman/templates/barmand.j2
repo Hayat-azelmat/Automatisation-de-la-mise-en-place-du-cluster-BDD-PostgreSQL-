@@ -1,0 +1,7 @@
+[{{ ansible_facts['hostname'] }}]
+description =  "{{ ansible_facts['hostname'] }} backup config"
+ssh_command = ssh {{ barman_postgresql_user }}@{{ ansible_facts['hostname'] }}
+conninfo = host={{ ansible_facts['hostname'] }} user={{ barman_user }} port={{ barman_postgresql_port }} dbname={{ barman_postgresql_dbname }}  
+backup_options = {{ barman_backup_options }}
+backup_method = {{ barman_backup_method }}
+archiver = {{ barman_archiver }}

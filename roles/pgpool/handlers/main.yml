@@ -1,0 +1,5 @@
+---
+- name: Reload pgpool
+  systemd:
+    name: pgpool
+    state: Reloaded

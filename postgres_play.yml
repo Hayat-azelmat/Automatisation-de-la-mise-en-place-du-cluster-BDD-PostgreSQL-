@@ -1,0 +1,92 @@
+---
+- name: Install Postgresql
+  hosts: all
+  become: yes
+  tasks:
+    - name: Load variables
+      include_vars: 001-postgresql.yml
+
+
+    - name: "Install packages"
+      yum: 
+        name: /home/arizkir/binaries/{{ item }}
+        state: present
+      loop:
+        - "postgresql{{ postgresql_version }}-libs-{{ postgresql_minor }}PGDG.rhel8.x86_64.rpm"
+        - "postgresql{{ postgresql_version }}-{{ postgresql_minor }}PGDG.rhel8.x86_64.rpm"
+        - "postgresql{{ postgresql_version }}-server-{{ postgresql_minor }}PGDG.rhel8.x86_64.rpm"
+        - "postgresql{{ postgresql_version }}-contrib-{{ postgresql_minor }}PGDG.rhel8.x86_64.rpm"
+        - "postgresql{{ postgresql_version }}-devel-{{ postgresql_minor }}PGDG.rhel8.x86_64.rpm"
+
+    - name: create symbolic link /user/pgsql
+      file:
+        src: "/usr/pgsql-{{ postgresql_version }}"
+        dest: /usr/pgsql
+        state: link
+
+
+    - name: "Add group postgres"
+      group:
+        name: postgres
+        state: present
+
+    - name: "Add user postgres"
+      user:
+        name: postgres
+        group: postgres
+        state: present
+
+    - name: Create an ssh key for postgres user in ~postgres/.ssh/id_rsa
+      user: 
+        name: postgres
+        generate_ssh_key: yes
+        ssh_key_bits: 2048
+        ssh_key_file: .ssh/id_rsa
+     
+    - name: Add authorized key from id_rsa.pub file
+      authorized_key:
+        user: postgres
+        state: present
+        key: "{{ lookup('file', '/home/postgres/.ssh/id_rsa.pub') }}"
+
+    - name: Backup id_rsa.pub of of primaire
+      tags: primaire
+      become_user: postgres
+      fetch:
+        src: ~/.ssh/id_rsa.pub
+        dest: buffer/primaire-id_rsa.pub
+        flat: yes
+    
+    - name: Backup id_rsa.pub of of secondaire
+      tags: secondaire
+      become_user: postgres
+      fetch:
+        src: ~/.ssh/id_rsa.pub
+        dest: buffer/secondaire-id_rsa.pub
+        flat: yes
+
+    - name: enable ssh passwordless between primaire and secondaire
+      tags: primaire
+      become_user: postgres
+      authorized_key:
+        user: postgres
+        state: present
+        key: "{{ lookup('file','buffer/primaire-id_rsa.pub')}}"
+
+    - name: enable ssh passwordless between secondaire and primaire
+      tags: primaire
+      become_user: postgres
+      authorized_key:
+        user: postgres
+        state: present
+        key: "{{ lookup('file','buffer/secondaire-id_rsa.pub')}}"
+
+    - name: update .bash_profile
+      copy:
+        src: files/{{ item }}
+        dest: /home/postgres
+        owner: postgres
+      loop:
+        - ".bash_profile"
+        - ".alias"
+ 

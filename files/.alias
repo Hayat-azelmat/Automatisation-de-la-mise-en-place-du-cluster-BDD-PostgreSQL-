@@ -1,0 +1,29 @@
+HOMEDIR=/home/postgres
+SCRDIR=$HOMEDIR/scripts
+
+pgsqldf() {
+ cd /var/log/postgresql/; PGLOG=$(ls -lrt /var/log/postgresql/postgre* | tail -1 | awk '{print $9}'); view $PGLOG
+}
+
+pooldf() {
+ cd /var/log/pgpool-II/; PGLOG=$(ls -lrt /var/log/pgpool-II/pgpool* | tail -1 | awk '{print $9}'); view $PGLOG
+}
+
+
+alias h='history 50'
+alias checkpgsql_ENV='echo "---------------- Variables Environnement"; env |grep pgsql; echo;'
+alias checkpgsql_PROC='echo "---------------- Process PostgreSQL";ps -ef |grep pgsql|grep -v grep;echo;'
+alias checkpgsql='clear;checkpgsql_ENV checkpgsql_PROC'
+alias pgsql='psql'
+alias pgsqlconf='vi /data/postgresql.conf'
+alias pgsqldiag='pgsqldf'
+alias pgpooldiag='pooldf'
+alias repmgrdiag='view /var/log/postgresql/repmgr.log'
+alias cdscr='cd $SCRDIR'
+alias cddiag='cd /var/log/postgresql/'
+alias cddata='cd /data/'
+alias cddump='cd /backup/'
+alias pgpoolconf='vi /etc/pgpool-II/pgpool.conf'
+alias lag='psql -f ~/scripts/lag_check.sql'
+alias lagd='psql -f  ~/scripts/lag_details.sql'
+

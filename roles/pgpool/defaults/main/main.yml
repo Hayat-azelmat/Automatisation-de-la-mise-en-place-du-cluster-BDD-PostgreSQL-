@@ -1,0 +1,20 @@
+---
+
+postgresql_version: 12
+pgpool_version: 12
+pgpool_minor: 4.3.2-1
+pgpool_postgresql_port: 5432
+postgresql_admin_user: postgres
+postgresql_admin_group: postgres
+pgpool_etc_path: /etc/pgpool-II
+pgpool_log_path: /var/log/pgpool-II
+pgpool_run_path: /var/run/pgpool-II
+postgresql_data_directory: /data
+pgpool_user: pgpool
+pgpool_ports: [9898/tcp, 9000/tcp, 9694/udp, 9999/tcp]
+repmgr_user: repmgr
+repmgr_database: repmgr
+pgpool_vip: 10.4.2.239
+pgpool_eth: ens192
+pgpool_primary_IP: 10.4.2.165
+pgpool_standby_IP: 10.4.2.166

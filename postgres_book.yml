@@ -1,0 +1,9 @@
+---
+- name: All steps here
+  hosts: all
+  become: yes
+  roles:
+    - role: postgresql
+    - role: barman
+    - role: repmgr
+    - role: pgpool

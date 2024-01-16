@@ -1,0 +1,67 @@
+---
+- name: Postgresql | Configure Postgres Cluster
+  hosts: all
+  become: yes
+  tasks: 
+    - name: Load variables
+      include_vars: 001-postgresql.yml
+
+    - name: Postgresql | check if directory $PGDATA exists
+      file:
+         path: "{{ postgresql_data_directory }}"
+         owner: "{{ postgresql_admin_user }}"
+         group: "{{ postgresql_admin_group }}"
+         state: directory
+         mode: 0700
+
+    - name: PostgreSQL | Make sure the postgres log directory exists
+      file:
+        path: "{{ postgresql_log_directory }}"
+        owner: "{{ postgresql_admin_user }}"
+        group: "{{ postgresql_admin_group }}"
+        state: directory 
+        mode: 0700
+ 
+    - name: PostgreSQL | check if instance exits
+      stat:
+        path: "{{ postgresql_data_directory }}/PG_VERSION"
+      register: pgdata_dir_version
+      when: inventory_hostname in groups['primaire']
+
+
+    - name: PostgreSQL | Instance Inialisation
+      become_user: "{{ postgresql_admin_user }}"
+      command: "{{ path_postgresql }}/initdb -D {{ postgresql_data_directory }}"
+      when:
+        - inventory_hostname in groups['primaire']
+        - not pgdata_dir_version.stat.exists
+
+    - name: PostgreSQL | update postgresql.conf
+      lineinfile:
+        path: "{{ postgresql_data_directory }}/postgresql.conf"
+        state: present
+        line: "{{ item }}"
+      loop:
+        - "{{ postgresql_config['listen'] }}"
+        - "{{ postgresql_config['shared'] }}"
+        - "{{ postgresql_config['workmem'] }}"
+        - "{{ postgresql_config['maintmem'] }}"
+        - "{{ postgresql_config['walbuf'] }}"
+        - "{{ postgresql_config['logdes'] }}"
+        - "{{ postgresql_config['logdir'] }}"
+        - "{{ postgresql_config['wallev'] }}" 
+      when: inventory_hostname in groups['primaire']
+
+    - name: PostgreSQL | update postgresql-{version}.service
+      lineinfile:
+        path: "/usr/lib/systemd/system/postgresql-{{ postgresql_version }}.service"
+        state: present
+        regexp: '^(.*)PGDATA=/var(.*)$'
+        line: "Environment=PGDATA={{ postgresql_data_directory }}/"
+
+    - name: PostgreSQL | Add ports to firewall
+      firewalld:
+        port: "{{ postgres_ports[0] }}/tcp"
+        state: enabled
+        permanent: true
+        immediate: true 

@@ -1,0 +1,5 @@
+---
+# name: barman | Installation and configuration of barman
+ - include: install.yml
+ - include: configure.yml
+ - include: check_backup.yml

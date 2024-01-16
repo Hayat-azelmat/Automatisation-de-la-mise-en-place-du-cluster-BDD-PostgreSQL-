@@ -1,0 +1,107 @@
+---
+- name: pgpool | create pgpool user
+  postgresql_user:
+    state: present
+    name: "{{ pgpool_user }}"
+    password: "{{ pgpool_pass }}"
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']
+
+- name: pgpool | add role pg_monitor to user
+  postgresql_query:
+    db: postgres
+    query: grant pg_monitor TO {{ pgpool_user }}
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']  
+  
+- name: pgpool | add pgpool_adm extension
+  postgresql_ext:
+    db: postgres
+    name: pgpool_adm
+    state: present
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']
+
+- name: pgpool | enable pgpool ports in firewall
+  firewalld:
+    port: "{{ item }}"
+    state: enabled
+    permanent: true
+    immediate: true
+  loop: "{{ pgpool_ports }}"
+
+
+- name: pgpool | update pool_hba.conf
+  become_user: "{{ postgresql_admin_user }}"
+  blockinfile:
+    path: "{{ pgpool_etc_path }}/pool_hba.conf"
+    block: "{{ lookup('template', 'pool_hba.j2') }}"
+
+- name: pgpool | create pgpool_node_id
+  copy: content="{{ pgpool_node_id }}" dest={{ pgpool_etc_path }}/pgpool_node_id
+  become_user: "{{ postgresql_admin_user }}"
+
+
+- name: pgpool | update pgpool.conf files
+  template:
+    src: pgpool.j2
+    dest: "{{ pgpool_etc_path }}/pgpool.conf"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0640
+
+#- name: pgpool | update .pgpass
+#  become_user: "{{ postgresql_admin_user }}"
+#  blockinfile:
+#    path: "/home/postgres/.pgpass"
+#    block: "{{ lookup('template', 'pgpass.j2') }}"
+
+- name: pgpool | Upload .pcppass file (postgres)
+  template:
+    src: pcppass.j2
+    dest: "/home/postgres/.pcppass"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0600
+
+- name: pgpool | update pcp.conf
+  become_user: "{{ postgresql_admin_user }}"
+  blockinfile:
+    path: "{{ pgpool_etc_path }}/pcp.conf"
+    block: "{{ lookup('template', 'pcp.j2') }}"
+
+- name: pgpool | ensure ~/scripts exists
+  file: 
+    path: "/home/postgres/scripts"
+    state: directory
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0770
+
+
+- name: pgpool | add failover, escalation, follow_master scripts
+  template:
+    src: "{{ item }}.j2"
+    dest: "/home/postgres/scripts/{{ item }}.sh"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0770
+  loop:
+    - failover
+    - escalation
+    - follow_master
+
+- name: pgpool | add pgpool_recovery.sh script
+  template:
+    src: pgpool_recovery.j2
+    dest: "{{ postgresql_data_directory }}/pgpool_recovery.sh"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0770
+
+
+- name: pgpool | Restart pgpool
+  systemd:
+    name: pgpool
+    state: restarted 
+

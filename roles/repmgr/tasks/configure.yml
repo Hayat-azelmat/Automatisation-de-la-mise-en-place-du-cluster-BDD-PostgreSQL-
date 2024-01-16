@@ -1,0 +1,68 @@
+---
+- name: repmgr | create repmgr user
+  postgresql_user:
+    state: present
+    name: "{{ repmgr_user }}"
+    password: "{{ repmgr_pass }}"
+    role_attr_flags: SUPERUSER
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | create repmgr DB
+  postgresql_db:
+    name: "{{ repmgr_database }}"
+    owner: "{{ repmgr_user }}"
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | set search_path for repmgr user
+  postgresql_query:
+    db: postgres
+    query: ALTER USER {{ repmgr_user }} SET search_path TO {{ repmgr_database }}, public
+  become_user: "{{ postgresql_admin_user }}"
+  when: inventory_hostname in groups['primaire']
+
+- name: repmgr | update .pgpass
+  become_user: "{{ postgresql_admin_user }}"
+  blockinfile:
+    path: "{{ repmgr_passfile }}"
+    block: "{{ lookup('template', 'pgpass.j2') }}"
+
+- name: repmgr | update pg_hba with grants for repmgr
+  postgresql_pg_hba:
+    dest: "{{ postgresql_pg_hba }}"
+    contype: host
+    users: "{{ repmgr_user }}"
+    databases: all
+    method: trust
+    source: "{{ item }}/32"
+  with_items: "{{ groups['all'] }}"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | add replication to hba
+  postgresql_pg_hba:
+    dest: "{{ postgresql_pg_hba }}"
+    contype: host
+    users: "{{ repmgr_user }}"
+    databases: replication
+    method: trust
+    source: "{{ item }}/32"
+  with_items: "{{ groups['all'] }}"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | reload postgresql after pg_hba conf
+  service: name=postgresql-12 state=restarted
+  when: inventory_hostname in groups['primaire']
+
+
+- name: repmgr | update repmgr.conf files
+  template:
+    src: repmgr.j2
+    dest: "{{ repmgr_conf_file }}"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0640

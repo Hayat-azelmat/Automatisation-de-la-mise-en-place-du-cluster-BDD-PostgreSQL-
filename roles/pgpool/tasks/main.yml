@@ -1,0 +1,4 @@
+---
+# tasks file for pgpool
+- include: install.yml
+- include: configure.yml

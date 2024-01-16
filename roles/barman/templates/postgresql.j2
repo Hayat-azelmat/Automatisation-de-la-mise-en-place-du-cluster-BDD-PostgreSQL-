@@ -1,0 +1,3 @@
+archive_mode = {{ barman_archiver }}
+archive_command = 'rsync -a %p {{ barman_user }}@{{ ansible_facts['hostname'] }}:/backup/barman/{{ ansible_facts['hostname'] }}/incoming/%f'
+archive_timeout = {{ barman_archiver_timeout }}

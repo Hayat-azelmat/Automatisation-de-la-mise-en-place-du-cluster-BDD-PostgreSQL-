@@ -1,0 +1,5 @@
+---
+#- name: PostgreSQL | Installation et configuration
+ - include:  postgres_play.yml
+ - include: configure_instance.yml
+ - include: configure_service.yml

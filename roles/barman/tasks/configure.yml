@@ -1,0 +1,117 @@
+---
+- name: barman | Add user barman to Postgresql cluster
+  postgresql_user:
+    state: present
+    name: "{{ barman_user }}"
+    password: "{{ barman_pass }}"
+    role_attr_flags: SUPERUSER
+  become_user: postgres
+  when: inventory_hostname in groups['primaire']
+
+
+- name: barman | Generate ssh key
+  user:
+    name: barman
+    generate_ssh_key: yes
+    ssh_key_bits: 2048
+    ssh_key_file: .ssh/id_rsa  
+
+
+- name: barman | Backup id_rsa.pub of barman
+  become_user: barman
+  fetch:
+    src: ~/.ssh/id_rsa.pub
+    dest: "buffer/barman_{{ ansible_facts['hostname'] }}.pub"
+    flat: yes
+
+
+- name: barman | enable ssh passwordless from barman to postgres 
+  become_user: postgres
+  authorized_key:
+    user: postgres
+    state: present
+    key: "{{ lookup('file','{{ item }}') }}"
+  with_fileglob:
+    - "buffer/barman*.pub" 
+
+- name: barman | enable ssh passwordless from postgres to barman
+  become_user: barman
+  authorized_key:
+    user: barman
+    state: present
+    key: "{{ lookup('file','{{ item }}') }}"
+  with_fileglob:
+    - "buffer/*id_rsa.pub"
+
+- name: barman | update barman.conf
+  template:
+    src: barman.j2
+    dest: /etc/barman.conf
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0640
+
+
+- name: barman | update barman.d files
+  template:
+    src: barmand.j2
+    dest: "/etc/barman.d/{{ ansible_facts['hostname'] }}.conf" 
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0640
+
+- name: barman | Update .pgpass for postgres user
+  template:
+    src: "pgpass.j2"
+    dest: "{{ barman_passfile }}"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    mode: 0600
+    trim_blocks: no
+
+
+- name: barman | update postgresql.conf
+  become_user: postgres 
+  blockinfile:
+    path: "{{ postgres_configuration_file_path }}"
+    block: "{{ lookup('template', 'postgresql.j2') }}"
+  when: inventory_hostname in groups['primaire']
+
+
+- name: barman | check if directory barman_hosts exists
+  file:
+    path: "{{ barman_home }}"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    state: directory
+    mode: 0777
+
+- name: barman | create location of archive
+  file:
+    path: "{{ barman_home }}/{{ ansible_facts['hostname'] }}/incoming/"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    state: directory
+    mode: 0777
+
+
+- name: barman | update pg_hba with grants for barman
+  postgresql_pg_hba:
+    dest: "{{ postgresql_pg_hba }}"
+    contype: host
+    users: "{{ barman_user }}" 
+    databases: all
+    method: trust
+    source: "{{ item }}/32"
+  with_items: "{{ groups['all'] }}"
+  when: inventory_hostname in groups['primaire']
+
+- name: reload postgresql
+  service: name=postgresql-12 state=restarted
+  when: inventory_hostname in groups['primaire']
+
+- name: barman | Allow passwordless restarts with postgres user
+  template:
+    src: "sudoers.j2"
+    dest: "/etc/sudoers.d/postgresql"
+    mode: 0640

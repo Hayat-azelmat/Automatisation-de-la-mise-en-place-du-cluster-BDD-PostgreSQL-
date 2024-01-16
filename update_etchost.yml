@@ -1,0 +1,16 @@
+--- 
+- name: update /etc/hosts with inventory
+  hosts: all
+  become: yes 
+  tasks:
+    - name: OS | generate  hosts  from inventory
+      tags: primaire
+      template:
+        src: hosts.j2
+        dest: buffer/hosts_tmp
+
+    - name: OS | append to /etc/hosts
+      blockinfile:
+        path: /etc/hosts
+        state: present
+        block: "{{lookup('file', 'buffers/hosts_tmp')}}"

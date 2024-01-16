@@ -1,0 +1,19 @@
+node_id='{{ repmgr_node_id }}'	
+node_name='{{ ansible_facts['hostname'] }}'
+conninfo='host={{ ansible_facts['hostname'] }} user={{ repmgr_user }}  dbname={{ repmgr_database }} connect_timeout=2'
+data_directory='{{ postgresql_data_directory }}'
+log_file='{{ postgresql_log_directory }}/repmgr.log'
+log_level='DEBUG'
+pg_bindir='{{ path_postgresql }}'
+reconnect_attempts='{{ repmgr_reconnect_attempts }}'
+reconnect_interval='{{ repmgr_reconnect_interval }}'
+failover='{{ repmgr_failover }}'
+promote_command='{{ path_postgresql }}/repmgr standby promote -f {{ repmgr_conf_file }} --log-to-file'
+follow_command='{{ path_postgresql }}/repmgr standby follow -f /etc/repmgr.conf --log-to-file --upstream-node-id=%n'
+monitoring_history=yes
+monitor_interval_secs=15
+service_start_command   = 'sudo systemctl start postgresql-{{ postgresql_version }}'
+service_stop_command    = 'sudo systemctl stop postgresql-{{ postgresql_version }}'
+service_restart_command = 'sudo systemctl restart postgresql-{{ postgresql_version }}'
+service_reload_command  = 'sudo systemctl reload postgresql-{{ postgresql_version }}'
+

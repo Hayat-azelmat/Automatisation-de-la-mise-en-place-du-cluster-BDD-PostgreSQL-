@@ -1,0 +1,33 @@
+---
+- name: repmgr | install packages
+  yum:
+    name:
+      - flex
+      - libselinux-devel
+      - libxml2-devel
+      - libxslt-devel
+      - openssl-devel
+      - pam-devel
+      - readline-devel
+      - redhat-rpm-config
+    state: present
+
+- name: repmgr | check if repmgr is already installed
+  shell: "/usr/pgsql/bin/repmgr -V"
+  register: repmgr_version
+  ignore_errors: True
+  become_user: "{{ postgresql_admin_user }}"
+
+
+- name: repmgr | position permissions on binaries
+  shell: "chmod a+x {{ repmgr_dir }}/*"
+  when: "repmgr_version.rc != 0"
+
+- name: repmgr | build repmgr-5.3.2
+  shell: "{{ item }}"
+  args:
+    chdir: "{{ repmgr_dir }}"
+  with_items:
+    - export PATH=/usr/pgsql/bin:$PATH; ./configure
+    - make install
+  when: "repmgr_version.rc != 0"

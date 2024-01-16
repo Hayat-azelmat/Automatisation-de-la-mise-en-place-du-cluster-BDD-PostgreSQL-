@@ -1,0 +1,421 @@
+#!/bin/bash
+
+##################################################################
+#
+#             BACKUP DE BASE DE DONNEES POSTGRESQL
+#
+#                                    Autheur :  DAMANE KHALID
+##################################################################
+
+#set -x
+
+###########################
+####### LOAD CONFIG #######
+###########################
+
+while [ $# -gt 0 ]; do
+        case $1 in
+                -c)
+                        CONFIG_FILE_PATH="$2"
+                        shift 2
+                        ;;
+                *)
+                        ${ECHO} "Option inconnu \"$1\"" 1>&2
+                        exit 2
+                        ;;
+        esac
+done
+
+if [ -z $CONFIG_FILE_PATH ] ; then
+        SCRIPTPATH=$(cd ${0%/*} && pwd -P)
+        CONFIG_FILE_PATH="${SCRIPTPATH}/pg_backup.config"
+fi
+
+if [ ! -r ${CONFIG_FILE_PATH} ] ; then
+        echo "Impossible de charger la config de ${CONFIG_FILE_PATH}" 1>&2
+        exit 1
+fi
+
+source "${CONFIG_FILE_PATH}"
+
+###########################
+#### PRE-BACKUP CHECKS ####
+###########################
+
+# Make sure we're running as the required backup user
+if [ "$BACKUP_USER" != "" -a "$(id -un)" != "$BACKUP_USER" ] ; then
+        echo "Erreur! Le script doit etre executer par l utilisateur $BACKUP_USER." 1>&2
+        exit 1
+fi
+
+
+###########################
+### INITIALISE DEFAULTS ###
+###########################
+
+if [ ! $HOSTNAME ]; then
+        HOSTNAME="localhost"
+fi;
+
+if [ ! $USERNAME ]; then
+        USERNAME="postgres"
+fi;
+
+if [ ! $PG_DATABASE ]; then
+        PG_DATABASE="postgres"
+fi;
+
+if [ ! $PGPORT ]; then
+        PGPORT="5432"
+fi;
+
+
+###########################
+#### START THE BACKUPS ####
+###########################
+
+
+create_monitor_tables()
+{
+SQLT1="create table IF NOT EXISTS pg_backupset(database_name varchar(150),backup_name varchar(350),type_backup varchar(50),date_debut timestamp,date_fin timestamp, status varchar(50),tsm_status varchar(50), hostname varchar(150), tsm_backup_date timestamp );"
+
+SQLT2="create table IF NOT EXISTS  pg_backupset_config(hostname varchar(150),activation_rman varchar(20), activation_barman varchar(20),dump_global varchar(20),dump_custom varchar(20),dump_plain varchar(20));"
+
+$PG_BIN/psql -h $HOSTNAME -p $PGPORT -U $USERNAME postgres -c "$SQLT1;$SQLT2"
+}
+
+
+function perform_backups()
+{
+        SUFFIX=$1
+        DUMP_DATE_TMP=`date +%y%m%d_%H%M%S`
+        FINAL_BACKUP_DIR=$BACKUP_EXP_DIR/"$DUMP_DATE_TMP$SUFFIX/"
+#       FINAL_BACKUP_DIR=$BACKUP_EXP_DIR/"`date +\%Y-\%m-\%d`$SUFFIX/"
+
+        echo "Making backup directory in $FINAL_BACKUP_DIR"
+
+        if ! mkdir -p $FINAL_BACKUP_DIR; then
+                echo "Cannot create backup directory in $FINAL_BACKUP_DIR. Go and fix it!" 1>&2
+                exit 1;
+        fi;
+
+        #######################
+        ### GLOBALS BACKUPS ###
+        #######################
+
+        echo -e "\n\nPerforming globals backup"
+        echo -e "--------------------------------------------\n"
+
+        if [ $ENABLE_GLOBALS_BACKUPS = "yes" ]
+        then
+                    echo "Globals backup"
+                    DUMP_DATE_BKP=`date +%y%m%d_%H%M%S`
+                    set -o pipefail
+                    if ! pg_dumpall -g -h "$HOSTNAME" -U "$USERNAME" | gzip > $FINAL_BACKUP_DIR"globals".sql.gz.in_progress; then
+                            echo "[!!ERROR!!] Failed to produce globals backup" 1>&2
+                    else
+                            mv $FINAL_BACKUP_DIR"globals".sql.gz.in_progress $FINAL_BACKUP_DIR"globals".sql.gz
+                            backup_audit "1" "global" "$FINAL_BACKUP_DIR"globals".sql.gz" "dump_global" "$DUMP_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"
+                    fi
+                    set +o pipefail
+        else
+                echo "None"
+        fi
+
+
+        ###########################
+        ### SCHEMA-ONLY BACKUPS ###
+        ###########################
+
+        for SCHEMA_ONLY_DB in ${SCHEMA_ONLY_LIST//,/ }
+        do
+                SCHEMA_ONLY_CLAUSE="$SCHEMA_ONLY_CLAUSE or datname ~ '$SCHEMA_ONLY_DB'"
+        done
+
+        SCHEMA_ONLY_QUERY="select datname from pg_database where false $SCHEMA_ONLY_CLAUSE order by datname;"
+
+        echo -e "\n\nPerforming schema-only backups"
+        echo -e "--------------------------------------------\n"
+
+        SCHEMA_ONLY_DB_LIST=`psql -h "$HOSTNAME" -U "$USERNAME" -At -c "$SCHEMA_ONLY_QUERY" postgres`
+
+        echo -e "The following databases were matched for schema-only backup:\n${SCHEMA_ONLY_DB_LIST}\n"
+
+        for DATABASE in $SCHEMA_ONLY_DB_LIST
+        do
+                echo "Schema-only backup of $DATABASE"
+                DUMP_DATE_BKP=`date +%y%m%d_%H%M%S`
+                set -o pipefail
+                if ! pg_dump -Fp -s -h "$HOSTNAME" -U "$USERNAME" "$DATABASE" | gzip > $FINAL_BACKUP_DIR"$DATABASE"_SCHEMA.sql.gz.in_progress; then
+                        echo "[!!ERROR!!] Failed to backup database schema of $DATABASE" 1>&2
+                else
+                        mv $FINAL_BACKUP_DIR"$DATABASE"_SCHEMA.sql.gz.in_progress $FINAL_BACKUP_DIR"$DATABASE"_SCHEMA.sql.gz
+                        backup_audit "1" "$DATABASE" "$FINAL_BACKUP_DIR"$DATABASE"_SCHEMA.sql.gz" "dump_metadata" "$DUMP_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"
+                fi
+                set +o pipefail
+        done
+
+
+        ###########################
+        ###### FULL BACKUPS #######
+        ###########################
+
+        for SCHEMA_ONLY_DB in ${SCHEMA_ONLY_LIST//,/ }
+        do
+                EXCLUDE_SCHEMA_ONLY_CLAUSE="$EXCLUDE_SCHEMA_ONLY_CLAUSE and datname !~ '$SCHEMA_ONLY_DB'"
+        done
+
+        FULL_BACKUP_QUERY="select datname from pg_database where not datistemplate and datallowconn $EXCLUDE_SCHEMA_ONLY_CLAUSE order by datname;"
+
+        echo -e "\n\nPerforming full backups"
+        echo -e "--------------------------------------------\n"
+
+        for DATABASE in `psql -h "$HOSTNAME" -U "$USERNAME" -At -c "$FULL_BACKUP_QUERY" postgres`
+        do
+                if [ $ENABLE_PLAIN_BACKUPS = "yes" ]
+                then
+                        echo "Plain backup of $DATABASE"
+
+                        DUMP_DATE_BKP=`date +%y%m%d_%H%M%S`
+                        set -o pipefail
+                        if ! pg_dump -Fp -h "$HOSTNAME" -U "$USERNAME" "$DATABASE" | gzip > $FINAL_BACKUP_DIR"$DATABASE".sql.gz.in_progress; then
+                                echo "[!!ERROR!!] Failed to produce plain backup database $DATABASE" 1>&2
+                        else
+                                mv $FINAL_BACKUP_DIR"$DATABASE".sql.gz.in_progress $FINAL_BACKUP_DIR"$DATABASE".sql.gz
+                                backup_audit "1" "$DATABASE" "$FINAL_BACKUP_DIR"$DATABASE".sql.gz" "dump_plain" "$DUMP_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"
+                        fi
+                        set +o pipefail
+
+                fi
+
+                if [ $ENABLE_CUSTOM_BACKUPS = "yes" ]
+                then
+                        echo "Custom backup of $DATABASE"
+
+                        DUMP_DATE_BKP=`date +%y%m%d_%H%M%S`
+                        if ! pg_dump -Fc -h "$HOSTNAME" -U "$USERNAME" "$DATABASE" -f $FINAL_BACKUP_DIR"$DATABASE".custom.in_progress; then
+                                echo "[!!ERROR!!] Failed to produce custom backup database $DATABASE"
+                        else
+                                mv $FINAL_BACKUP_DIR"$DATABASE".custom.in_progress $FINAL_BACKUP_DIR"$DATABASE".custom
+                                backup_audit "1" "$DATABASE" "$FINAL_BACKUP_DIR"$DATABASE".custom" "dump_custom" "$DUMP_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"
+                        fi
+                fi
+
+        done
+
+        echo -e "\nAll database backups complete!"
+}
+
+
+
+basebackup_perform_backups()
+{
+        echo Creation de repertoire de sauvegarde dans : $FINAL_BACKUP_DIR
+
+        if [ ! -d "$FINAL_BACKUP_DIR" ];
+        then
+                if ! mkdir -p $FINAL_BACKUP_DIR; then
+                        echo "Cannot create backup directory in $FINAL_BACKUP_DIR. Go and fix it!" 1>&2
+                        exit 1;
+                fi
+        fi
+
+        if [ ! -d "$SERVERLOG" ];
+        then
+                if ! mkdir -p $SERVERLOG; then
+                        echo "Cannot create log directory in $SERVERLOG. Go and fix it!" 1>&2
+                        exit 1;
+                fi
+        fi
+
+                ################################
+                ###  SAUVEGARDE BASEBACKUP   ###
+                ################################
+
+        echo
+        echo  "Lancement de la sauvegarde BASEBACKUP "
+        echo  "--------------------------------------------"
+        echo
+
+        find $BACKUP_RMAN_DIR/ -maxdepth 1 -mtime +$DAYS_TO_KEEP -name "*" -exec rm -rf '{}' ';'
+        DUMP_DATE_BKP=`date +%y%m%d_%H%M%S`
+        $PG_BIN/pg_basebackup -Ft -h $HOSTNAME  -l $PG_DATABASE -p $PGPORT -U $USERNAME -D $BACKUP_RMAN_DIR/basebackup_$DATE_TMP -z -P -c fast 2> $SERVERLOG/$LOGFILE
+        [ "$?" -ne "0" ] && echo "[!!ERREUR!!] Impossible d'effectuer la sauvegarde BASEBACKUP." || backup_audit "1" "all" "$BACKUP_RMAN_DIR/basebackup_$DATE_TMP" "basebackup" "$DUMP_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"; export BACKUP_TYPE=$BACKUP_TYPE",'basebackup'"
+}
+
+
+barman_perform_backups()
+{
+        echo Creation de repertoire de sauvegarde dans : $FINAL_BACKUP_DIR
+
+        if [ ! -d "$FINAL_BACKUP_DIR" ];
+        then
+                if ! mkdir -p $FINAL_BACKUP_DIR; then
+                        echo "Cannot create backup directory in $FINAL_BACKUP_DIR. Go and fix it!" 1>&2
+                        exit 1;
+                fi
+        fi
+
+        if [ ! -d "$SERVERLOG" ];
+        then
+                if ! mkdir -p $SERVERLOG; then
+                        echo "Cannot create log directory in $SERVERLOG. Go and fix it!" 1>&2
+                        exit 1;
+                fi
+        fi
+
+                ################################
+                ###  SAUVEGARDE BASEBACKUP   ###
+                ################################
+
+        echo
+        echo  "Lancement de la sauvegarde BASEBACKUP "
+        echo  "--------------------------------------------"
+        echo
+
+
+        BARMAN_DATE_BKP=`date +%y%m%d_%H%M%S`
+
+        barman backup `hostname` >  $SERVERLOG/$LOGFILE
+
+        if [ "$?" -ne "0" ];
+        then
+                echo "[!!ERREUR!!] Impossible d'effectuer la sauvegarde BARMAN."
+        else
+                export BACKUP_DIR=`head -1 $SERVERLOG/$LOGFILE |  awk '{print $NF}'`
+
+                COMP_FILE=`echo $BACKUP_DIR | awk -F'/' '{print $NF}'`
+
+                tar -czvf $BACKUP_DIR ${BACKUP_BARMAN_DIR}/${COMP_FILE}.tar.gz
+
+
+
+                backup_audit "1" "all" "${BACKUP_BARMAN_DIR}/${COMP_FILE}.tar.gz" "barman" "$BARMAN_DATE_BKP" "`date +%y%m%d_%H%M%S`" "DONE" "NONE" "$HOSTNAME"
+
+                export BACKUP_TYPE=$BACKUP_TYPE",'barman'"
+        fi
+
+        cd "$FINAL_BACKUP_DIR"
+        gzip *
+
+}
+
+
+backup_audit()
+{
+    if [ "$1" -eq "1" ];
+    then
+        echo Injection de metadata des sauvegardes base de données dans la table postgres.pg_backupset
+
+        PGSQL="insert into pg_backupset(database_name,backup_name,type_backup,date_debut,date_fin,status,tsm_status,hostname) values('$2','$3','$4',to_timestamp('$5','YYMMDD_HH24MISS'),to_timestamp('$6','YYMMDD_HH24MISS'),'$7','$8','$9');"
+        $PG_BIN/psql -h $HOSTNAME -p $PGPORT -U $USERNAME postgres -c "$PGSQL"
+    else
+        echo Injection verification des sauvegardes sur TSM dans la table postgres.pg_backupset
+        PGSQL2="update pg_backupset set tsm_status='$2',tsm_backup_date=to_timestamp('$4','YYMMDD_HH24MISS') where backup_name='$3';"
+        $PG_BIN/psql -h $HOSTNAME -p $PGPORT -U $USERNAME postgres -c "$PGSQL2"
+    fi
+
+}
+
+
+
+backup_tsm()
+{
+        echo Lancement de sauvegarde TSM
+        TSM_BKP_DATE=`date +%y%m%d_%H%M%S`
+        $TSM_BIN i -subdir=yes "$BACKUP_REP_DIR/*" 1> $SERVERLOG/tsm_backup_$TSM_BKP_DATE.log
+        [ "`cat $SERVERLOG/tsm_backup_$TSM_BKP_DATE.log|grep Successful|wc -l`" -ne "2" ] && echo "[!!ERREUR!!] Impossible d'effectuer la sauvegarde sur TSM.";
+
+        echo Verification des sauvegardes sur TSM
+        $PG_BIN/psql -h $HOSTNAME -p 5432 -U usebkp postgres -t -c "select backup_name from pg_backupset where tsm_status='NONE';" -o /tmp/backup_details.txt
+
+        cat /tmp/backup_details.txt |while read backup_name
+do
+        echo $backup_name
+        $TSM_BIN q ba "$backup_name" 1> /tmp/tsm_rslt.log
+        [ "`cat /tmp/tsm_rslt.log |grep "$backup_name" |wc -l`" -eq "1" ] && backup_audit "2" "DONE" "$backup_name" "$TSM_BKP_DATE" || backup_audit "2" "NOT_DONE" "$backup_name"
+done
+}
+
+######################################
+###  main
+######################################
+
+create_monitor_tables
+
+if [ "$ACTIVATION_RMAN" = "yes" ];
+then
+        ###################################
+        ###  BACKUP DE TYPE BASEBACKUP  ###
+        ###################################
+
+        export DATE_TMP=`date +%y%m%d_%H%M%S`
+
+        export LOGFILE=basebackup_$DATE_TMP.log
+
+        export FINAL_BACKUP_DIR=$BACKUP_RMAN_DIR
+
+        basebackup_perform_backups
+fi
+
+
+if [ "$ACTIVATION_BARMAN" = "yes" ];
+then
+        ###################################
+        ###  BACKUP DE TYPE BARMAN  ###
+        ###################################
+
+        export DATE_TMP=`date +%y%m%d_%H%M%S`
+
+        export LOGFILE=barman_$DATE_TMP.log
+
+        export FINAL_BACKUP_DIR=$BACKUP_BARMAN_DIR
+
+        barman_perform_backups
+fi
+
+
+if [ "$ACTIVATION_DUMP" = "yes" ];
+then
+
+        # MONTHLY BACKUPS
+
+        DAY_OF_MONTH=`date +%d`
+
+        if [ $DAY_OF_MONTH -eq 1 ];
+        then
+                # Delete all expired monthly directories
+                find $BACKUP_EXP_DIR -maxdepth 1 -mtime +$MONTH_TO_KEEP -name "*-monthly" -exec rm -rf '{}' ';'
+
+                perform_backups "-monthly"
+        else
+
+        # WEEKLY BACKUPS
+
+        DAY_OF_WEEK=`date +%u` #1-7 (Monday-Sunday)
+        EXPIRED_DAYS=`expr $((($WEEKS_TO_KEEP * 7) + 1))`
+
+        if [ $DAY_OF_WEEK = $DAY_OF_WEEK_TO_KEEP ];
+        then
+                # Delete all expired weekly directories
+#                find $BACKUP_EXP_DIR -maxdepth 1 -mtime +$EXPIRED_DAYS -name "*-weekly" -exec rm -rf '{}' ';'
+                 find $BACKUP_EXP_DIR -maxdepth 1 -mtime +$WEEKS_TO_KEEP -name "*-weekly" -exec rm -rf '{}' ';'
+
+                perform_backups "-weekly"
+        else
+
+        # DAILY BACKUPS
+
+        # Delete daily backups 7 days old or more
+        find $BACKUP_EXP_DIR -maxdepth 1 -mtime +$DAYS_TO_KEEP -name "*-daily" -exec rm -rf '{}' ';'
+
+        perform_backups "-daily"
+        fi
+        fi
+
+fi
+
+PGSQL3="update pg_backupset_config set hostname='$HOSTNAME',activation_rman='$ACTIVATION_RMAN',activation_barman='$ACTIVATION_BARMAN',dump_global='$ENABLE_GLOBALS_BACKUPS',dump_custom='$ENABLE_CUSTOM_BACKUPS',dump_plain='$ENABLE_PLAIN_BACKUPS';"
+$PG_BIN/psql -h $HOSTNAME -p $PGPORT -U $USERNAME postgres -c "$PGSQL3"
+backup_tsm
+

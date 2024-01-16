@@ -1,0 +1,22 @@
+---
+
+- name: "pgpool | Install packages"
+  yum:
+    name: /home/arizkir/binaries/{{ item }}
+    state: present
+    disable_gpg_check: True
+  loop:
+    - "pgpool-II-pg{{ pgpool_version }}-{{ pgpool_minor }}pgdg.rhel8.x86_64.rpm"
+    - "pgpool-II-pg{{ pgpool_version }}-devel-{{ pgpool_minor }}pgdg.rhel8.x86_64.rpm"
+    - "pgpool-II-pg{{ pgpool_version }}-extensions-{{ pgpool_minor }}pgdg.rhel8.x86_64.rpm"
+
+- name: pgpool | create pgpool directories
+  file:
+    path: "{{ item }}"
+    owner: "{{ postgresql_admin_user }}"
+    group: "{{ postgresql_admin_group }}"
+    state: directory
+  loop:
+    - "{{ pgpool_etc_path }}"
+    - "{{ pgpool_log_path }}"
+    - "{{ pgpool_run_path }}"

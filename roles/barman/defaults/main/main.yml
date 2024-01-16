@@ -1,0 +1,28 @@
+---
+#barman_hostname: 192.168.1.12
+barman_version: 2.12-1
+
+barman_home: /backup/barman 
+barman_user: barman
+barman_group: barman
+barman_postgresql_port: 5432
+barman_passfile: /home/postgres/.pgpass
+barman_postgresql_dbname: postgres
+barman_postgresql_user: postgres
+barman_backup_options: concurrent_backup
+barman_backup_method: rsync
+barman_archiver: on
+barman_configuration_file_path: /etc/barman.conf
+barman_log_file: /var/log/barman/barman.log
+barman_log_level: INFO
+barman_config_dir: /etc/barman.d
+barman_compression: gzip
+barman_reuse_backup: "link"
+barman_retention_policy: RECOVERY WINDOW OF 1 WEEKS
+barman_network_compression: false
+barman_basebackup_retry_times: 3
+barman_basebackup_retry_sleep: 30
+barman_archiver_timeout: 300
+barman_immediate_checkpoint: true
+barman_upstreams: []
+postgres_configuration_file_path: /data/postgresql.conf
